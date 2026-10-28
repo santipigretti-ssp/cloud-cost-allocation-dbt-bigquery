@@ -1,0 +1,159 @@
+version: 2
+
+models:
+  - name: stg_billing_lines
+    description: >
+      Billing AWS tipado 1:1 con raw. El costo acá es el ORIGINAL del feed
+      (la corrección de la cuenta 846 se aplica en int_billing_lines_corrected).
+      is_untagged marca las 552 líneas sin tag_cluster (overhead aguas abajo).
+    columns:
+      - name: line_id
+        description: Identificador único de línea de facturación.
+        data_tests:
+          - unique
+          - not_null
+      - name: billing_period
+        description: Período de facturación (YYYY-MM).
+        data_tests:
+          - not_null
+      - name: usage_date
+        data_tests:
+          - not_null
+      - name: provider
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["aws"]
+              config:
+                severity: warn # el servicio podría sumar GCP; alertar, no romper
+      - name: account_id
+        description: Cuenta AWS (STRING con cero inicial).
+        data_tests:
+          - not_null
+      - name: tag_cluster
+        description: Cluster tageado en la línea; NULL = overhead sin tag.
+      - name: cost
+        description: Costo original del feed en USD, sin correcciones.
+        data_tests:
+          - not_null
+      - name: is_untagged
+        data_tests:
+          - not_null
+
+  - name: stg_cluster_set_membership
+    description: >
+      Mapa cluster → cluster_set deduplicado (137 filas; el par cl-088/cs-018
+      venía repetido). sets_per_cluster > 1 identifica los 6 clusters
+      compartidos cuyo costo se splitea por uso.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - cluster_id
+              - cluster_set_id
+    columns:
+      - name: cluster_id
+        data_tests:
+          - not_null
+      - name: cluster_set_id
+        data_tests:
+          - not_null
+      - name: sets_per_cluster
+        description: Cantidad de sets a los que pertenece el cluster (1 o 2 en los datos actuales).
+        data_tests:
+          - not_null
+
+  - name: stg_entity_clusterset_map
+    description: >
+      Mapa entidad → cluster_set con vigencia. Los solapamientos (app-fraud-04)
+      son válidos por decisión de negocio: el uso pesa en ambos sets.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - entity_id
+              - cluster_set_id
+              - valid_from
+    columns:
+      - name: entity_id
+        data_tests:
+          - not_null
+      - name: cluster_set_id
+        data_tests:
+          - not_null
+      - name: valid_from
+        data_tests:
+          - not_null
+      - name: valid_to
+        description: Fin de vigencia; 9999-12-31 = abierta.
+        data_tests:
+          - not_null
+
+  - name: stg_usage_compute
+    description: >
+      vCPU-hours diarios por entidad. Solo SELECT DISTINCT (colapsa el
+      duplicado exacto del 2025-08-20). Uso 0 es legítimo (apps apagadas meses
+      enteros). Política simétrica con storage: la unicidad por clave es warn
+      acá — un duplicado de clave con valores en conflicto sobrevive a la regla
+      de outlier (int_usage_flagged) y la unicidad estricta se exige recién
+      post-exclusión sobre int_usage_unioned.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - entity_id
+              - usage_date
+          config:
+            severity: warn
+    columns:
+      - name: entity_id
+        data_tests:
+          - not_null
+      - name: usage_date
+        data_tests:
+          - not_null
+      - name: usage_amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: usage_unit
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["vCPU-hours"]
+
+  - name: stg_usage_storage
+    description: >
+      GB diarios por entidad. SIN dedup por clave: el par outlier del
+      2025-07-15 (app-reporting-01) debe llegar intacto a int_usage_flagged,
+      donde se flaguea y excluye del peso. Por eso la unicidad por
+      (entity_id, usage_date) es warn acá y se exige estricta recién
+      post-exclusión de outliers (en int_usage_unioned).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - entity_id
+              - usage_date
+          config:
+            severity: warn
+    columns:
+      - name: entity_id
+        data_tests:
+          - not_null
+      - name: usage_date
+        data_tests:
+          - not_null
+      - name: usage_amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: usage_unit
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["GB"]

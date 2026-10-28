@@ -1,0 +1,7 @@
+[
+  {"name": "billing_period", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "usage_date", "type": "DATE", "mode": "NULLABLE"},
+  {"name": "entity_id", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "usage_amount", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "usage_unit", "type": "STRING", "mode": "NULLABLE"}
+]

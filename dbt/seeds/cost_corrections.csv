@@ -1,0 +1,2 @@
+account_id,correction_factor,valid_from,valid_to,approved_by,reason
+088420000846,0.001,2025-04-01,9999-12-31,pending_owner_validation,"Costo unitario implícito ~1000x resto de cuentas; /1000 alinea total del servicio con referencia 200-260k/mes"

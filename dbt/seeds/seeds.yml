@@ -1,0 +1,44 @@
+version: 2
+
+seeds:
+  - name: cost_corrections
+    description: >
+      Correcciones de costo por cuenta como dato versionado (no código).
+      Caso actual: la cuenta 088420000846 factura ~x1000 fuera de escala
+      (costo unitario implícito $59/vCPU-h vs $0.03-0.08 en el resto).
+      Se joinea en int_billing_lines_corrected por account_id + rango de
+      fechas; sin match el factor efectivo es 1.0. Si el feed se corrige
+      en origen, se cierra valid_to — la corrección tiene vigencia temporal,
+      autoría y razón auditables.
+    config:
+      column_types:
+        account_id: string # conserva el cero inicial — nunca INT
+        correction_factor: float64
+        valid_from: date
+        valid_to: date
+        approved_by: string
+        reason: string
+    columns:
+      - name: account_id
+        description: Cuenta AWS a corregir, con cero inicial (formato del feed de billing).
+        data_tests:
+          - not_null
+      - name: correction_factor
+        description: Factor multiplicativo aplicado al costo original.
+        data_tests:
+          - not_null
+      - name: valid_from
+        description: Inicio de vigencia de la corrección (inclusive).
+        data_tests:
+          - not_null
+      - name: valid_to
+        description: >
+          Fin de vigencia EXCLUSIVO (primer día NO cubierto), convención
+          semiabierta [valid_from, valid_to) igual que entity_clusterset_map;
+          9999-12-31 = abierta.
+        data_tests:
+          - not_null
+      - name: approved_by
+        description: Quién validó la corrección (pending_owner_validation hasta confirmar con el dueño del servicio).
+      - name: reason
+        description: Justificación auditable de la corrección.

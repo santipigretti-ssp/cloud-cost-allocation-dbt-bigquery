@@ -1,0 +1,27 @@
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+/logs/
+.user.yml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Airflow (fase posterior)
+airflow/logs/
+airflow/*.db
+airflow/.env
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Archivos locales (no se publican)
+CLAUDE.md
+.claude/
+Prueba_Tecnica.pdf

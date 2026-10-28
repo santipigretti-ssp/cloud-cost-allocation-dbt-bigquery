@@ -1,0 +1,30 @@
+name: dss_cost_allocation
+version: "1.0.0"
+config-version: 2
+
+profile: dss_cost_allocation
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+
+target-path: target
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # Umbrales de negocio — ajustables sin tocar SQL
+  outlier_threshold_multiplier: 5 # x mediana móvil
+  outlier_window_days: 14
+  shared_cluster_fallback: "even_split" # si ningún set tiene uso
+  reconciliation_tolerance: 0.01 # USD
+
+models:
+  dss_cost_allocation:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: table
+    marts:
+      # cada modelo declara su config incremental (insert_overwrite +
+      # copy_partitions por billing_month); table es solo el default de red
+      +materialized: table

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Resumen del pipeline — Cost Allocation dss</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #0b0b0b; font-size: 10.5px; line-height: 1.5; }
+  h1 { font-size: 20px; letter-spacing: -0.01em; }
+  .sub { color: #52514e; font-size: 11px; margin: 4px 0 14px; }
+  h2 { font-size: 13px; margin: 16px 0 8px; padding-bottom: 3px; border-bottom: 1.5px solid #0b0b0b; }
+  h3 { font-size: 11px; margin: 10px 0 4px; }
+  p { margin: 4px 0; }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; background: #f0efec; padding: 0 3px; border-radius: 3px; }
+  .avoid-break { break-inside: avoid; }
+
+  .flow { display: flex; flex-direction: column; gap: 0; margin: 10px 0 4px; }
+  .lane { display: flex; align-items: stretch; gap: 8px; }
+  .lane-tag { width: 88px; flex: none; font-size: 8.5px; font-weight: 700; color: #52514e; text-transform: uppercase; letter-spacing: 0.06em; padding-top: 10px; }
+  .nodes { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; padding: 5px 0; }
+  .node { border: 1.2px solid #0b0b0b; border-radius: 7px; padding: 4px 8px; font-size: 9px; background: #fff; }
+  .node b { display: block; font-size: 9.5px; font-family: ui-monospace, Menlo, monospace; }
+  .node.src { border-style: dashed; }
+  .node.rule { background: #fdf3e0; border-color: #b97b00; }
+  .node.out { background: #e8f0fb; border-color: #1c5cab; }
+  .down { color: #898781; font-size: 10px; padding-left: 96px; line-height: 1; }
+
+  .b { display: inline-block; font-size: 7.5px; font-weight: 700; letter-spacing: 0.05em; border-radius: 3px; padding: 1px 5px; vertical-align: 1px; margin-right: 4px; }
+  .b-rule { background: #fdf3e0; color: #8a5c00; border: 1px solid #d9a03c; }
+  .b-dec  { background: #e8f0fb; color: #1c5cab; border: 1px solid #6da7ec; }
+  .b-test { background: #e9f5e9; color: #0a6b0a; border: 1px solid #6cbf6c; }
+
+  ul { padding-left: 16px; margin: 4px 0; }
+  li { margin: 3px 0; }
+  table { border-collapse: collapse; width: 100%; margin-top: 6px; font-size: 9.5px; }
+  th { text-align: left; background: #f0efec; }
+  th, td { padding: 3.5px 7px; border: 1px solid #d8d7d0; vertical-align: top; }
+  td code { background: none; padding: 0; }
+  .foot { margin-top: 14px; padding-top: 6px; border-top: 1px solid #d8d7d0; color: #898781; font-size: 8.5px; }
+</style>
+</head>
+<body>
+
+<h1>Pipeline de Cost Allocation <code style="font-size:15px">dss</code> — resumen de alto nivel</h1>
+<p class="sub">Cómo fluye el dato desde el billing crudo hasta el costo por aplicación · BigQuery + dbt + Airflow · Leyenda:
+<span class="b b-rule">REGLA</span> regla de negocio aplicada &nbsp;·&nbsp; <span class="b b-dec">DECISIÓN</span> decisión de diseño/método &nbsp;·&nbsp; <span class="b b-test">TEST</span> control automático</p>
+
+<h2>1 · El flujo completo de un vistazo</h2>
+<div class="flow">
+  <div class="lane">
+    <div class="lane-tag">Fuentes</div>
+    <div class="nodes">
+      <div class="node src"><b>5 CSVs (datasets/)</b>billing · membership · map · uso compute · uso storage</div>
+      <div class="node src"><b>seed cost_corrections</b>correcciones versionadas</div>
+    </div>
+  </div>
+  <div class="down">▼ &nbsp;bq load / Python — schemas explícitos, WRITE_TRUNCATE</div>
+  <div class="lane">
+    <div class="lane-tag">RAW (BigQuery)</div>
+    <div class="nodes"><div class="node"><b>raw_dss.*</b>espejo exacto de los CSVs, sin transformar</div></div>
+  </div>
+  <div class="down">▼ &nbsp;dbt · staging (views)</div>
+  <div class="lane">
+    <div class="lane-tag">Staging 1:1</div>
+    <div class="nodes">
+      <div class="node"><b>stg_billing_lines</b>tipado + flag sin tag</div>
+      <div class="node"><b>stg_cluster_set_membership</b>DISTINCT + nº de sets</div>
+      <div class="node"><b>stg_entity_clusterset_map</b>vigencias tipadas</div>
+      <div class="node"><b>stg_usage_compute</b>solo DISTINCT exacto</div>
+      <div class="node"><b>stg_usage_storage</b>solo DISTINCT exacto</div>
+    </div>
+  </div>
+  <div class="down">▼ &nbsp;dbt · intermediate (tables) — acá vive toda la lógica de negocio</div>
+  <div class="lane">
+    <div class="lane-tag">Preparación</div>
+    <div class="nodes">
+      <div class="node rule"><b>int_billing_lines_corrected</b>costo ÷1000 cuenta 846 (seed)</div>
+      <div class="node rule"><b>int_usage_flagged</b>outliers compute+storage (simétrico)</div>
+      <div class="node rule"><b>int_entity_set_daily</b>vigencias expandidas por día</div>
+      <div class="node"><b>int_usage_unioned</b>uso válido (sin outliers)</div>
+      <div class="node"><b>int_usage_daily</b>peso por entidad/set/driver</div>
+    </div>
+  </div>
+  <div class="down">▼ &nbsp;asignación en cascada</div>
+  <div class="lane">
+    <div class="lane-tag">Asignación</div>
+    <div class="nodes">
+      <div class="node"><b>int_cluster_cost_daily</b>costo por cluster y driver</div>
+      <div class="node rule"><b>int_cluster_set_cost_daily</b>split de clusters compartidos</div>
+      <div class="node rule"><b>int_entity_cost_daily</b>prorrata a entidades + no asignado</div>
+    </div>
+  </div>
+  <div class="down">▼ &nbsp;dbt · marts — agregación por período</div>
+  <div class="lane">
+    <div class="lane-tag">Salidas</div>
+    <div class="nodes">
+      <div class="node out"><b>fct_cost_allocated_entity_period</b>costo por entidad/mes (3 drivers, medida cost)</div>
+      <div class="node out"><b>fct_cost_unallocated_detail</b>costo no asignado, por razón</div>
+      <div class="node out"><b>fct_unassigned_usage</b>uso sin costo (diagnóstica)</div>
+    </div>
+  </div>
+</div>
+<p>Orquestación: DAG de Airflow <code>load_raw_to_bq ≫ dbt_build ≫ notify_summary</code> (trigger manual, reproceso por mes vía parámetro). <code>dbt build</code> corre modelos y tests juntos: si un control crítico falla, el pipeline falla.</p>
+
+<h2>2 · Paso a paso: qué transforma cada capa</h2>
+
+<div class="avoid-break">
+<h3>Carga RAW — <code>scripts/load_raw_to_bq.{sh,py}</code></h3>
+<p>Copia los 5 CSVs a BigQuery tal cual vienen (idempotente: cada corrida reemplaza la tabla). <span class="b b-dec">DECISIÓN</span>Schemas explícitos compartidos (<code>scripts/bq_schemas/*.json</code>), nunca autodetect: los <code>account_id</code> traen cero inicial (<code>088420000317</code>) y la inferencia los convertiría a números, destruyéndolos. IDs siempre STRING.</p>
+</div>
+
+<div class="avoid-break">
+<h3>Staging — espejo tipado, sin lógica de negocio</h3>
+<p>Cinco vistas 1:1 con la fuente: renombran, tipan y colapsan copias exactas. <span class="b b-dec">DECISIÓN</span>El layering es estricto: staging no joinea fuentes ni aplica reglas — toda decisión de negocio vive en intermediate.</p>
+<p><span class="b b-dec">DECISIÓN</span><b>Política de duplicados uniforme:</b> antes de deduplicar se pregunta qué <i>es</i> una fila. <b>(A)</b> copia <b>exacta</b> de una relación/medición → <code>DISTINCT</code> mecánico, sin pérdida. <b>(B)</b> misma clave con <b>valores en conflicto</b> → nunca se resuelve con un <code>min()</code>/<code>row_number()</code> arbitrario: pasa a una regla explícita o rompe un test. Staging solo hace (A).</p>
+<ul>
+  <li><code>stg_billing_lines</code> — tipado + <code>is_untagged</code> (línea sin cluster = overhead futuro). El costo acá es el <i>original</i> del feed.</li>
+  <li><code>stg_cluster_set_membership</code> — <span class="b b-rule">REGLA</span>caso (A): <code>DISTINCT</code> elimina el duplicado exacto cl-088 (relación pura, repetirla no agrega información) y marca los 6 clusters en 2 sets (<code>sets_per_cluster</code>).</li>
+  <li><code>stg_usage_compute</code> / <code>stg_usage_storage</code> — <span class="b b-rule">REGLA</span>caso (A) <b>simétrico</b> en ambos: solo <code>DISTINCT</code> (colapsa el 2025-08-20 de compute, 100% idéntico). Sin dedup por clave: un conflicto de valores (hoy solo el par outlier de storage) llega intacto a la regla de outlier.</li>
+</ul>
+</div>
+
+<div class="avoid-break">
+<h3>Intermediate · preparación de insumos</h3>
+<ul>
+  <li><code>int_billing_lines_corrected</code> — <span class="b b-rule">REGLA</span>aplica la corrección de la cuenta 846 (facturaba ×1000: ~$1,5M/mes → $1.500): join a la seed por cuenta + vigencia; sin match, factor 1.0. <span class="b b-dec">DECISIÓN</span>la corrección es <i>dato versionado</i> (factor, vigencia, autoría, razón), no código; <code>cost_original</code> e <code>is_corrected</code> quedan para auditoría. Todo lo downstream lee costo <b>solo</b> de acá.</li>
+  <li><code>int_usage_flagged</code> — union de compute + storage con su driver + detección de outlier <b>simétrica por entidad × driver</b>. <span class="b b-rule">REGLA</span>outlier = uso &gt; 5× la mediana móvil de 14 días Y existe otra fila normal esa misma fecha/driver. <span class="b b-dec">DECISIÓN</span>la condición dual excluye del peso <b>solo</b> ante evidencia positiva de registro corrupto; un valor alto <b>aislado</b> no se excluye (un pico real se cobra a quien lo generó) — lo lista un test warn. El outlier se conserva flageado como evidencia, no se corrige el valor.</li>
+  <li><code>int_entity_set_daily</code> — expande el mapa entidad↔set a una fila por día. <span class="b b-rule">REGLA</span><code>valid_to</code> exclusivo (verificado: app-loyalty-01 migra de set el 2025-09-01 sin doble conteo). <span class="b b-dec">DECISIÓN</span>vigencias solapadas son ambas válidas (app-fraud-04 pesa en sus 2 sets durante jun–jul).</li>
+  <li><code>int_usage_unioned</code> — <code>int_usage_flagged</code> sin outliers: la <b>única definición</b> de qué uso cuenta (ambos drivers). La consumen el peso de asignación y el reporte de uso huérfano, que así no pueden divergir. Su unicidad estricta post-exclusión rompe el build ante cualquier conflicto de clave no resuelto.</li>
+  <li><code>int_usage_daily</code> — cruza el uso válido con los sets vigentes → peso por (día, entidad, set, driver). <span class="b b-dec">DECISIÓN</span>el uso de las 5 entidades sin mapeo no entra al peso: se reporta aparte como evidencia (<code>orphan_entity_usage</code>), sin recibir costo.</li>
+</ul>
+</div>
+
+<div class="avoid-break">
+<h3>Intermediate · asignación en cascada (cluster → set → entidad)</h3>
+<ul>
+  <li><code>int_cluster_cost_daily</code> — agrega el costo corregido por (día, cluster, driver, cuenta). <span class="b b-rule">REGLA</span>mapeo <code>product_code → cost_driver</code>: EC2=compute, S3=storage. Las líneas sin tag (DataTransfer, CloudWatch, GuardDuty, Support) quedan fuera: son overhead y se prorratean recién en el mart. <span class="b b-dec">DECISIÓN</span>atribuibilidad (tag) y naturaleza (producto) son dimensiones ortogonales que hoy coinciden 100%; un test las guarda para que un feed futuro desalineado no misroutee en silencio.</li>
+  <li><code>int_cluster_set_cost_daily</code> — reparte el costo del cluster a sus sets: 1 set → 100%; <span class="b b-rule">REGLA</span>2 sets → proporcional al uso de cada set ese día para ese driver (<b>EC2 se reparte por vCPU-hours y S3 por GB — nunca se mezclan unidades</b>); <span class="b b-dec">DECISIÓN</span>si ningún set tiene uso, fallback 50/50 (parametrizado; hoy nunca ocurre). Cluster sin set → pasa entero a no asignado (<code>unmapped_cluster</code>).</li>
+  <li><code>int_entity_cost_daily</code> — reparte el costo del set entre sus entidades vigentes, proporcional al uso del driver. Casos borde, todos explícitos:
+    <ul>
+      <li><span class="b b-rule">REGLA</span>uso total &gt; 0 → prorrata normal (<code>usage_proportional</code>).</li>
+      <li><span class="b b-dec">DECISIÓN</span>uso 0 (capacidad reservada ociosa) → <b>even-split entre las entidades vigentes</b>, flageado: <code>sole_member_no_usage</code> si el pool tiene 1 entidad (cuenta 512 en septiembre; también abril de app-buyer-07 y app-payments-05), <code>even_split_no_usage</code> si tiene N>1 (hoy no ocurre). Unificar N=1 y N>1 elimina la discontinuidad indefendible (cobrar 100% a una entidad sola pero $0 a un pool de dos). Nunca se divide por cero; nunca es silencioso.</li>
+      <li><span class="b b-rule">REGLA</span>set sin entidades vigentes → no asignado (<code>orphan_cluster_set</code>: cs-010/035/040 + el hallazgo cs-058, que factura 15 días antes de la vigencia de su única app).</li>
+    </ul>
+  </li>
+</ul>
+</div>
+
+<div class="avoid-break">
+<h3>Marts — las tablas de salida (2 principales + 1 diagnóstica)</h3>
+<ul>
+  <li><code>fct_cost_allocated_entity_period</code> — grano: mes × entidad × driver × método. <span class="b b-dec">DECISIÓN</span><b>formato largo (tidy)</b>: una sola medida aditiva <code>cost</code> y <code>cost_driver ∈ {compute, storage, overhead}</code>. El overhead sin tag se prorratea por costo directo y sale como filas <code>cost_driver='overhead'</code> (no como columna solapada): así es graficable como un slice más y se elimina el riesgo de doble conteo. Directo = filtrar compute/storage; fully loaded = todo. <span class="b b-dec">DECISIÓN</span>en producción es incremental por partición mensual; en sandbox corre como tabla (el sandbox expira particiones &gt;60 días — verificado, documentado en el modelo).</li>
+  <li><code>fct_cost_unallocated_detail</code> — solo <b>costo</b> (USD), grano mes × razón: <code>unmapped_cluster</code>, <code>orphan_cluster_set</code>. Medida única que participa de la reconciliación sin filtros. El overhead ya no está acá (driver asignado).</li>
+  <li><code>fct_unassigned_usage</code> — <span class="b b-dec">DECISIÓN</span>tabla diagnóstica separada: <b>uso</b> sin costo (vCPU-h/GB) por entidad × driver, razones <code>orphan_entity_usage</code> y <code>excluded_outlier_usage</code>. Costo y uso sin asignar nunca coexisten en una fila — mezclarlos era meter dos facts (medida, unidad, grano y rol distintos) en una tabla. El filtro <code>cost is not null</code> que la reconciliación necesitaba era el síntoma; separando, desaparece.</li>
+</ul>
+</div>
+
+<div class="avoid-break">
+<h3>Controles automáticos (corren en cada <code>dbt build</code>)</h3>
+<ul>
+  <li><span class="b b-test">TEST</span><code>assert_reconciliation</code> — <b>el crítico</b>: por mes, asignado (compute + storage + overhead, contado una sola vez) + no asignado = facturado corregido, con tolerancia $0,01. Garantiza que ningún dólar se pierde ni se duplica.</li>
+  <li><span class="b b-test">TEST</span><code>assert_unit_cost_in_range</code> — costo unitario implícito por cuenta/driver dentro de [0.1×, 10×] de la mediana global: detectaría un futuro "caso 846" en datos nuevos.</li>
+  <li><span class="b b-test">TEST</span><code>assert_single_row_usage_spikes</code> (warn) — anomalías de uso de fila única que la regla de outlier no excluye: insumo de preguntas al dueño (¿pico real o error de unidad?).</li>
+  <li><span class="b b-test">TEST</span><code>assert_no_usage_allocations_flagged</code> (warn) — lista toda asignación sin uso (<code>sole_member_no_usage</code> + <code>even_split_no_usage</code>): asignado pero nunca silencioso.</li>
+  <li><span class="b b-test">TEST</span><code>assert_tag_product_alignment</code> (error) — falla si un EC2/S3 llega sin tag o un servicio de otra clase con tag: protege el supuesto del modelo de overhead ante datos nuevos.</li>
+  <li><span class="b b-test">TEST</span>~100 tests genéricos: unicidad de claves por capa (la estricta post-dedup de uso, en <code>int_usage_unioned</code>, cubre ambos drivers), valores aceptados en métodos/razones, integridad billing→membership (warn: los 4 clusters sin mapeo son conocidos; alerta si crece).</li>
+</ul>
+</div>
+
+<h2>3 · Mapa de decisiones → dónde viven en el código</h2>
+<table>
+  <tr><th style="width:34%">Regla / decisión</th><th style="width:38%">Qué hace</th><th>Dónde</th></tr>
+  <tr><td>IDs como STRING, schemas explícitos</td><td>Preserva ceros iniciales de <code>account_id</code></td><td><code>scripts/bq_schemas/*.json</code></td></tr>
+  <tr><td>Corrección ×1000 cuenta 846</td><td>Factor 0.001 con vigencia y autoría, auditable</td><td><code>seeds/cost_corrections.csv</code> → <code>int_billing_lines_corrected</code></td></tr>
+  <tr><td>Política de duplicados uniforme</td><td>DISTINCT solo para copias exactas; conflicto → regla o test, nunca <code>min()</code></td><td><code>stg_usage_compute</code> / <code>stg_usage_storage</code></td></tr>
+  <tr><td>Outlier simétrico, excluido no corregido</td><td>&gt;5× mediana móvil 14d + fila normal misma fecha, por driver</td><td><code>int_usage_flagged</code> (vars en <code>dbt_project.yml</code>)</td></tr>
+  <tr><td>Vigencias: fin exclusivo, solapes válidos</td><td>Migraciones sin doble conteo; fraud-04 pesa en 2 sets</td><td><code>int_entity_set_daily</code></td></tr>
+  <tr><td>Split de clusters compartidos por uso</td><td>Proporcional al uso del set por día/driver; fallback 50/50</td><td><code>int_cluster_set_cost_daily</code></td></tr>
+  <tr><td>Prorrata por uso medido, por driver</td><td>EC2 por vCPU-hours, S3 por GB, por día</td><td><code>int_entity_cost_daily</code></td></tr>
+  <tr><td>Capacidad ociosa (sin uso): even-split flageado</td><td><code>sole_member</code> (N=1) / <code>even_split</code> (N>1), sin discontinuidad</td><td><code>int_entity_cost_daily</code> + test warn</td></tr>
+  <tr><td>Supuesto del overhead (tag ⟺ producto)</td><td>Rompe el build si un feed lo desalinea, no misroutea</td><td><code>tests/assert_tag_product_alignment.sql</code></td></tr>
+  <tr><td>Overhead como driver asignado (formato largo)</td><td>Una medida <code>cost</code>, overhead graficable como slice, sin doble conteo</td><td><code>fct_cost_allocated_entity_period</code></td></tr>
+  <tr><td>Costo y uso sin asignar en tablas separadas</td><td>Una fact = una medida/unidad/grano; sin mezclar dólares y uso</td><td><code>fct_cost_unallocated_detail</code> · <code>fct_unassigned_usage</code></td></tr>
+  <tr><td>Reconciliación al centavo</td><td>Asignado + no asignado = facturado, por mes</td><td><code>tests/assert_reconciliation.sql</code></td></tr>
+</table>
+
+<p class="foot">Pipeline dss-cost-allocation · dbt + BigQuery + Airflow · período 2025-04 a 2025-09 · resultado: $249k/mes facturado corregido, 92,3% asignado a 120 entidades, $19k/mes no asignado con causa identificada. Fuente HTML versionada junto al PDF (docs/resumen_pipeline.html). Detalle ejecutivo en docs/propuesta.html.</p>
+
+</body>
+</html>

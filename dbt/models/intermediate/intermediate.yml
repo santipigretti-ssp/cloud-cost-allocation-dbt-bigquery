@@ -1,0 +1,203 @@
+version: 2
+
+models:
+  - name: int_billing_lines_corrected
+    description: >
+      Billing con la corrección de la seed cost_corrections aplicada (cuenta
+      846 ÷1000). Única fuente de costo para todo lo downstream; cost_original
+      y correction_factor quedan para auditoría.
+    columns:
+      - name: line_id
+        data_tests:
+          - unique
+          - not_null
+      - name: cost
+        description: Costo corregido en USD (cost_original × correction_factor).
+        data_tests:
+          - not_null
+      - name: cost_original
+        description: Costo tal como vino en el feed, sin corregir.
+        data_tests:
+          - not_null
+      - name: correction_factor
+        data_tests:
+          - not_null
+      - name: is_corrected
+        data_tests:
+          - not_null
+
+  - name: int_usage_flagged
+    description: >
+      Uso de AMBOS drivers (compute + storage) con is_outlier calculado
+      (mediana móvil 14d por entidad × driver). La política de outliers es
+      simétrica entre drivers. Post-exclusión, la clave (usage_date, entity_id,
+      cost_driver) es única — esa garantía estricta vive en int_usage_unioned.
+    columns:
+      - name: cost_driver
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["compute", "storage"]
+      - name: is_outlier
+        description: >
+          usage > multiplicador × mediana móvil Y existe otra fila de la misma
+          entidad/fecha/driver dentro del patrón. Condición dual: solo excluye
+          ante evidencia positiva de registro corrupto (grano roto + medición
+          de reemplazo). Las flageadas se excluyen del peso pero se conservan
+          (informativas en excluded_outlier_usage). Las anomalías de fila única
+          las lista assert_single_row_usage_spikes.
+        data_tests:
+          - not_null
+      - name: rolling_median_usage
+        data_tests:
+          - not_null
+
+  - name: int_entity_set_daily
+    description: >
+      Vigencias entidad↔set expandidas por día (spine min/max de billing).
+      valid_to exclusivo. app-fraud-04 tiene 2 sets simultáneos jun-jul 2025:
+      decisión de negocio, ambos válidos.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - usage_date
+              - entity_id
+              - cluster_set_id
+    columns:
+      - name: usage_date
+        data_tests:
+          - not_null
+      - name: entity_id
+        data_tests:
+          - not_null
+      - name: cluster_set_id
+        data_tests:
+          - not_null
+
+  - name: int_usage_unioned
+    description: >
+      Uso diario unificado (compute + storage sin outliers): única definición
+      de qué filas de uso cuentan. Lo consumen int_usage_daily (peso) y
+      fct_unassigned_usage (evidencia de uso huérfano) — la exclusión de
+      outliers vive solo acá. Post-exclusión la clave (usage_date, entity_id,
+      cost_driver) es única.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - usage_date
+              - entity_id
+              - cost_driver
+    columns:
+      - name: cost_driver
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["compute", "storage"]
+      - name: usage_amount
+        data_tests:
+          - not_null
+
+  - name: int_usage_daily
+    description: >
+      Uso diario por (entidad, set, driver), sin outliers ni entidades
+      huérfanas. Es el peso de la asignación.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - usage_date
+              - entity_id
+              - cluster_set_id
+              - cost_driver
+    columns:
+      - name: cost_driver
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["compute", "storage"]
+      - name: usage_amount
+        data_tests:
+          - not_null
+
+  - name: int_cluster_cost_daily
+    description: >
+      Costo corregido por (día, cluster, driver, cuenta), solo líneas con tag.
+      El overhead sin tag se prorratea a nivel mart.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - usage_date
+              - account_id
+              - cluster_id
+              - cost_driver
+    columns:
+      - name: cluster_id
+        data_tests:
+          - not_null
+          # 4 clusters facturados sin mapeo a set (cl-001/041/042/114): sabido
+          # y manejado como unallocated → warn para vigilar que no crezca.
+          - relationships:
+              arguments:
+                to: ref('stg_cluster_set_membership')
+                field: cluster_id
+              config:
+                severity: warn
+      - name: cost_driver
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["compute", "storage", "overhead"]
+      - name: cost
+        data_tests:
+          - not_null
+
+  - name: int_cluster_set_cost_daily
+    description: >
+      Costo del cluster repartido a sets (full / usage_split / even_split
+      fallback). Los clusters sin set llevan unallocated_reason =
+      'unmapped_cluster' y cluster_set_id NULL.
+    columns:
+      - name: cost
+        data_tests:
+          - not_null
+      - name: split_method
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["full", "usage_split", "even_split"]
+      - name: unallocated_reason
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["unmapped_cluster"]
+
+  - name: int_entity_cost_daily
+    description: >
+      Grano final de la asignación diaria: costo por entidad (asignado) o por
+      set/cluster (no asignado, entity_id NULL). Los marts agregan por período
+      desde acá. La suma de cost + overhead sin tag reconcilia contra
+      int_billing_lines_corrected (test assert_reconciliation).
+    columns:
+      - name: cost
+        data_tests:
+          - not_null
+      - name: allocation_method
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["usage_proportional", "sole_member_no_usage", "even_split_no_usage"]
+      - name: unallocated_reason
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["unmapped_cluster", "orphan_cluster_set"]
+      - name: cost_driver
+        data_tests:
+          - not_null

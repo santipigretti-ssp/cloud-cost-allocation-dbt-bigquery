@@ -1,0 +1,123 @@
+version: 2
+
+models:
+  - name: fct_cost_allocated_entity_period
+    description: >
+      Costo asignado por entidad y período (tabla de salida 1). Formato largo:
+      una sola medida aditiva `cost` y cost_driver ∈ {compute, storage,
+      overhead}. compute/storage = costo directo por uso; overhead = overhead
+      sin tag prorrateado por costo directo, con allocation_method
+      'overhead_prorated'. Vistas por filtro: directo = cost_driver in
+      (compute,storage); fully loaded = todo. Incremental por partición
+      mensual (insert_overwrite + copy_partitions).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - billing_period
+              - entity_id
+              - cost_driver
+              - allocation_method
+    columns:
+      - name: billing_period
+        data_tests:
+          - not_null
+      - name: billing_month
+        description: billing_period como DATE (día 1) — clave de partición.
+        data_tests:
+          - not_null
+      - name: entity_id
+        data_tests:
+          - not_null
+      - name: cost_driver
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["compute", "storage", "overhead"]
+      - name: allocation_method
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["usage_proportional", "sole_member_no_usage", "even_split_no_usage", "overhead_prorated"]
+      - name: cost
+        description: >
+          Costo asignado en USD (medida única, aditiva). En filas overhead es la
+          porción prorrateada; en compute/storage es el costo directo por uso.
+        data_tests:
+          - not_null
+      - name: is_corrected_source
+        description: TRUE si parte del costo proviene de líneas corregidas por la seed (cuenta 846).
+        data_tests:
+          - not_null
+
+  - name: fct_cost_unallocated_detail
+    description: >
+      Detalle del COSTO no asignado por período y razón (tabla de salida 2).
+      Medida única `cost` (USD): participa de la reconciliación sin filtros. El
+      overhead NO está acá (es un driver asignado en el mart 1); la evidencia de
+      USO sin asignar vive en fct_unassigned_usage (otra medida/unidad/grano).
+    columns:
+      - name: billing_period
+        data_tests:
+          - not_null
+      - name: billing_month
+        data_tests:
+          - not_null
+      - name: reason
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - unmapped_cluster
+                  - orphan_cluster_set
+      - name: cost_driver
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["compute", "storage", "overhead"]
+      - name: cost
+        description: Costo no asignado en USD (medida única, aditiva).
+        data_tests:
+          - not_null
+
+  - name: fct_unassigned_usage
+    description: >
+      Tabla diagnóstica (salida 3): uso que no recibe costo, por período,
+      entidad, driver y razón. Medida única `usage_amount` (vCPU-hours para
+      compute, GB para storage). NO participa de la reconciliación — es
+      evidencia, no dinero. Separada de fct_cost_unallocated_detail a propósito.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - billing_period
+              - entity_id
+              - cost_driver
+              - reason
+    columns:
+      - name: billing_period
+        data_tests:
+          - not_null
+      - name: entity_id
+        data_tests:
+          - not_null
+      - name: cost_driver
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["compute", "storage"]
+      - name: reason
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["orphan_entity_usage", "excluded_outlier_usage"]
+      - name: usage_amount
+        description: Volumen de uso sin costo asignado (vCPU-hours o GB según el driver).
+        data_tests:
+          - not_null

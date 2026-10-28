@@ -1,0 +1,6 @@
+[
+  {"name": "entity_id", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "cluster_set_id", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "valid_from", "type": "DATE", "mode": "NULLABLE"},
+  {"name": "valid_to", "type": "DATE", "mode": "NULLABLE"}
+]

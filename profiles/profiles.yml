@@ -1,0 +1,13 @@
+dss_cost_allocation:
+  target: bq_sandbox
+  outputs:
+    bq_sandbox:
+      type: bigquery
+      method: oauth # requiere: gcloud auth application-default login
+      # placeholder para entornos GUI sin env vars; exportar GCP_PROJECT_ID con tu proyecto (CLI/CI)
+      project: "{{ env_var('GCP_PROJECT_ID', 'your-gcp-project-id') }}"
+      dataset: dbt_dss
+      location: US
+      threads: 4
+      job_execution_timeout_seconds: 300
+      priority: interactive

@@ -1,0 +1,38 @@
+# Airflow 2.9 standalone mínimo para correr el DAG local.
+#
+# Uso:
+#   export GCP_PROJECT_ID=mi-proyecto
+#   gcloud auth application-default login   # genera las ADC que se montan abajo
+#   cd airflow && docker compose up
+#   UI: http://localhost:8080 (usuario admin; la password la imprime el log
+#   de "standalone" al arrancar). Triggerear el DAG dss_cost_allocation.
+#
+# En producción esto vive en Composer: mismo DAG, sin docker-compose.
+
+services:
+  airflow:
+    image: apache/airflow:2.9.3-python3.11
+    command: standalone
+    environment:
+      # dbt y cliente de BigQuery dentro del contenedor (demo; en una imagen
+      # productiva esto va horneado en el Dockerfile, no instalado al vuelo)
+      _PIP_ADDITIONAL_REQUIREMENTS: "dbt-core>=1.9,<2.0 dbt-bigquery>=1.9,<2.0"
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:?export GCP_PROJECT_ID antes de levantar}
+      # credenciales de usuario (ADC) montadas read-only desde el host
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/gcloud/adc.json
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      # el pip install del arranque puede demorar gunicorn en máquinas lentas;
+      # con el default (120s) Airflow mata el webserver y no vuelve a levantarlo
+      AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "600"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ..:/opt/airflow/repo
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/opt/gcloud/adc.json:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5

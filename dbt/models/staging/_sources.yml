@@ -1,0 +1,78 @@
+version: 2
+
+sources:
+  - name: raw_dss
+    description: >
+      Capa RAW: los 5 CSVs cargados sin transformar por scripts/load_raw_to_bq.sh
+      (schemas explícitos, WRITE_TRUNCATE). Período 2025-04 a 2025-09.
+    schema: raw_dss
+    tables:
+      - name: cluster_billing_lines
+        description: >
+          Costo AWS real a grano día × cluster × usage_type (49.474 filas).
+          tag_cluster es nullable: 552 filas sin tag (DataTransfer, CloudWatch,
+          GuardDuty, Support) se tratan como overhead aguas abajo.
+        columns:
+          - name: line_id
+            description: Identificador único de línea de facturación.
+            data_tests:
+              - not_null
+          - name: usage_date
+            data_tests:
+              - not_null
+          - name: account_id
+            description: Cuenta AWS con cero inicial (STRING, nunca INT).
+            data_tests:
+              - not_null
+          - name: cost
+            data_tests:
+              - not_null
+
+      - name: cluster_set_membership
+        description: >
+          Mapa cluster → cluster_set (138 filas). Contiene 1 duplicado exacto
+          (cl-088/cs-018) y 6 clusters presentes en 2 sets — se resuelven en staging.
+        columns:
+          - name: cluster_id
+            data_tests:
+              - not_null
+          - name: cluster_set_id
+            data_tests:
+              - not_null
+
+      - name: entity_clusterset_map
+        description: >
+          Mapa entidad → cluster_set con vigencia (122 filas). valid_to
+          9999-12-31 = vigencia abierta.
+        columns:
+          - name: entity_id
+            data_tests:
+              - not_null
+          - name: cluster_set_id
+            data_tests:
+              - not_null
+
+      - name: entity_usage_compute
+        description: >
+          Uso de cómputo por día × entidad en vCPU-hours (22.404 filas).
+          2025-08-20 viene duplicado completo (123 entidades × 2 filas idénticas).
+        columns:
+          - name: entity_id
+            data_tests:
+              - not_null
+          - name: usage_date
+            data_tests:
+              - not_null
+
+      - name: entity_usage_storage
+        description: >
+          Uso de storage por día × entidad en GB (22.465 filas). Contiene una
+          fila outlier (app-reporting-01, 2025-07-15, 45.000 GB) que convive
+          con la fila normal de la misma fecha.
+        columns:
+          - name: entity_id
+            data_tests:
+              - not_null
+          - name: usage_date
+            data_tests:
+              - not_null
